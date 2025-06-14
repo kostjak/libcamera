@@ -613,6 +613,32 @@ int PipelineHandlerBase::configure(Camera *camera, CameraConfiguration *config)
 		 */
 		link->setEnabled(true);
 		const MediaPad *sinkPad = link->sink();
+
+		/* Set routing */
+		V4L2Subdevice::Routing routing;
+		const V4L2Subdevice::Stream imageStream {
+			0, 0}; //TODO pad and stream must be somehow determined based on amount
+		//of sink/source pads. This only works for single mux, with 4 channel GMSL this will
+		//not work properly
+		const V4L2Subdevice::Stream embeddedDataStream {
+			0, 1}; //TODO same as above
+
+		routing.emplace_back(imageStream, V4L2Subdevice::Stream{1, 0},
+		       V4L2_SUBDEV_ROUTE_FL_ACTIVE);
+
+		if (data->sensorMetadata_) {
+			LOG(RPI, Info) << "Configuring metadata streams for " << device->entity()->name();
+
+			routing.emplace_back(embeddedDataStream, V4L2Subdevice::Stream{1, 1},
+				       V4L2_SUBDEV_ROUTE_FL_ACTIVE);
+
+		}
+
+		ret = device->setRouting(&routing);
+		if (ret < 0)
+			LOG(RPI, Debug) << "Failed to activate routing: " << strerror(-ret);
+
+		/* After routes are enabled, we can set formats */
 		ret = device->setFormat(sinkPad->index(), sensorFormat);
 		if (ret) {
 			LOG(RPI, Error) << "Failed to set format on " << device->entity()->name()
@@ -620,6 +646,20 @@ int PipelineHandlerBase::configure(Camera *camera, CameraConfiguration *config)
 					<< " with format  " << *sensorFormat
 					<< ": " << ret;
 			return ret;
+		}
+
+		if (data->sensorMetadata_) {
+			LOG(RPI, Info) << "Configuring metadata format for " << device->entity()->name();
+
+			V4L2SubdeviceFormat embeddedDataFormat = data->sensor_->embeddedDataFormat();
+
+			ret = device->setFormat(embeddedDataStream, &embeddedDataFormat);
+			if (ret) {
+				LOG(RPI, Error) << "Failed to set format on " << device->entity()->name()
+						<< " pad " << sinkPad->index()
+						<< " with format  " << embeddedDataFormat
+						<< ": " << ret;
+			}
 		}
 
 		LOG(RPI, Debug) << "Configured media link on device " << device->entity()->name()
